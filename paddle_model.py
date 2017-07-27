@@ -176,10 +176,12 @@ def build_classification_loss(predictions, classes):
     """
     Build a classification loss given predictions and desired outputs.
     """
-    return paddle.layer.cross_entropy_cost(input=predictions, label=classes)
+    # classification_cost is just multi-class cross entropy,
+    # but it also add a classification error evaluator.
+    return paddle.layer.classification_cost(input=predictions, label=classes)
 
 
-def build_model(config):
+def build_model(config, is_infer=False):
     """
     Build the PaddlePaddle model for a configuration.
     """
@@ -203,12 +205,17 @@ def build_model(config):
     start_word_pred = pick_word(config, document_embeddings)
     end_word_pred = pick_word(config, document_embeddings)
 
-    losses = [
-        build_classification_loss(sentence_pred, correct_sentence),
-        build_classification_loss(start_word_pred, correct_start_word),
-        build_classification_loss(end_word_pred, correct_end_word),
-    ]
-    return losses
+    if is_infer:
+        return [
+            sentence_pred, correct_sentence, start_word_pred,
+            correct_start_word, end_word_pred, correct_end_word
+        ]
+    else:
+        return [
+            build_classification_loss(sentence_pred, correct_sentence),
+            build_classification_loss(start_word_pred, correct_start_word),
+            build_classification_loss(end_word_pred, correct_end_word)
+        ]
 
 
 if __name__ == "__main__":

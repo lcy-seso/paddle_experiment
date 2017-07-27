@@ -206,10 +206,7 @@ def build_model(config, is_infer=False):
     end_word_pred = pick_word(config, document_embeddings)
 
     if is_infer:
-        return [
-            sentence_pred, correct_sentence, start_word_pred,
-            correct_start_word, end_word_pred, correct_end_word
-        ]
+        return [sentence_pred, start_word_pred, end_word_pred]
     else:
         return [
             build_classification_loss(sentence_pred, correct_sentence),

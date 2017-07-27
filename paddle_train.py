@@ -74,7 +74,7 @@ def choose_samples(path):
     valid_samples.sort()
 
     random.shuffle(train_samples)
-    random.shuffle(valid_samples)
+    # random.shuffle(valid_samples)
 
     return train_samples, valid_samples
 

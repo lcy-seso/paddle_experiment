@@ -14,35 +14,7 @@ from paddle.v2.layer import parse_network
 
 __all__ = ["build_model"]
 
-UNK = "<UNK>"
-SOS = "<SOS>"
-EOS = "<EOS>"
-PAD = "<PAD>"
 EMBEDDING_DIM = 300
-
-Config = namedtuple("Config", [
-    "question_layers",
-    "document_layers",
-    "layer_size",
-    "embedding_dropout",
-    "hidden_dropout",
-    "learning_rate",
-    "anneal_every",
-    "anneal_rate",
-    "epochs",
-    "param_save_filename_format",
-    "vocab_size",
-    "data_dir",
-    "batch_size",
-])
-
-
-def load_config(path):
-    """
-    Load the JSON config file from a file.
-    """
-    with open(path, "r") as handle:
-        return Config(**json.load(handle))
 
 
 def embedding_input(name, vocab_size, drop_rate=0.):
@@ -241,5 +213,5 @@ def build_model(config):
 
 if __name__ == "__main__":
     conf = load_config("paddle-config.json")
-    costs = build_model(conf)
-    print(parse_network(costs))
+    losses = build_model(conf)
+    print(parse_network(losses))

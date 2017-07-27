@@ -109,7 +109,7 @@ def make_gru_step(size, static_input, prefix):
     return gru_with_static_input
 
 
-def bidirectional_lstm(inputs, size, depth, prefix=""):
+def bidirectional_lstm(inputs, size, depth, drop_rate=0., prefix=""):
     """
     Run a bidirectional LSTM on the inputs.
     """
@@ -138,7 +138,9 @@ def bidirectional_lstm(inputs, size, depth, prefix=""):
         paddle.layer.last_seq(input=lstm_last[0]),
         paddle.layer.first_seq(input=lstm_last[1]),
     ])
-    return final_states, paddle.layer.concat(input=lstm_last)
+    return final_states, paddle.layer.concat(
+        input=lstm_last,
+        layer_attr=paddle.attr.ExtraLayerAttribute(drop_rate=drop_rate), )
 
 
 def build_document_embeddings(config, documents, same_as_question,
@@ -156,7 +158,7 @@ def build_document_embeddings(config, documents, same_as_question,
         input=question_vector, expand_as=documents)
     _, hidden = bidirectional_lstm([hidden, question_expanded],
                                    config.layer_size, config.document_layers,
-                                   "__document__")
+                                   config.hidden_dropout, "__document__")
 
     return hidden
 
@@ -167,7 +169,8 @@ def build_question_vector(config, questions):
     """
 
     final, lstm_hidden = bidirectional_lstm(
-        questions, config.layer_size, config.question_layers, "__question__")
+        questions, config.layer_size, config.question_layers,
+        config.hidden_dropout, "__question__")
 
     # The other half is created by doing an affine transform to generate
     # candidate embeddings, doing a second affine transform followed by a
@@ -192,10 +195,8 @@ def pick_word(config, word_embeddings):
 
     This is done with a two-class classification.
     """
-    hidden = paddle.layer.dropout(
-        input=word_embeddings, dropout_rate=config.hidden_dropout)
     predictions = paddle.layer.fc(
-        input=hidden, size=2, act=paddle.activation.Softmax())
+        input=word_embeddings, size=2, act=paddle.activation.Softmax())
     return predictions
 
 

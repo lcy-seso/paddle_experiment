@@ -20,7 +20,6 @@
   - `paddle.layer.dropout` actually defines a `paddle.layer.add_to` layer and set the droprate in this layer. This is a little waste of memory, becuase output value to drop is copied again and PaddlePaddle will not release the memory to improve the time efficiency. But if you want to drop a recurrent layer's output, you have to use `paddle.layer.dropout`.
 
 ## 3. About different recurrent layers in PaddlePaddle.
-  - I found you both use `paddle.layer.recurrent_group` and `paddle.networks.simple_lstm` they are all recurrent units in PaddlePaddle. I write some notes about the differences about them.
   - If you do not need explicitly access to the intermedia values in a recurent unit (hidden states, input-to-hidden mapping, memory cells and so on), I recommend using `paddle.networks.simple_lstm` or `paddle.layer.lstmemory`.
   - `recurrent_group` is usefull in attention model, or NTM.
 

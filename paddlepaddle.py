@@ -4,6 +4,7 @@ A PaddlePaddle implementation of a question answering model.
 from __future__ import print_function
 
 from collections import namedtuple
+import pdb
 import glob
 import gzip
 import json
@@ -15,13 +16,13 @@ import click
 import numpy as np
 
 import paddle.v2 as paddle
+from paddle.v2.layer import parse_network
 
 UNK = "<UNK>"
 SOS = "<SOS>"
 EOS = "<EOS>"
 PAD = "<PAD>"
 EMBEDDING_DIM = 300
-
 
 Config = namedtuple("Config", [
     "question_layers",
@@ -48,19 +49,20 @@ def load_config(path):
         return Config(**json.load(handle))
 
 
-def embedding_input(name, vocab_size):
+def embedding_input(name, vocab_size, drop_rate=0.):
     """
     Create an embedding input to the network.
 
     Embeddings are static Glove vectors.
     """
     data = paddle.layer.data(
-        name=name,
-        type=paddle.data_type.integer_value_sequence(vocab_size))
+        name=name, type=paddle.data_type.integer_value_sequence(vocab_size))
     embeddings = paddle.layer.embedding(
         input=data,
         size=EMBEDDING_DIM,
-        param_attr=paddle.attr.Param(name="GloveVectors", is_static=True))
+        param_attr=paddle.attr.Param(
+            name="GloveVectors", is_static=True),
+        layer_attr=paddle.attr.ExtraLayerAttribute(drop_rate=drop_rate), )
     return embeddings
 
 
@@ -69,8 +71,7 @@ def binary_output(name):
     Create a binary output for the network.
     """
     data = paddle.layer.data(
-        name=name,
-        type=paddle.data_type.integer_value_sequence(2))
+        name=name, type=paddle.data_type.integer_value_sequence(2))
     return data
 
 
@@ -79,31 +80,41 @@ def binary_input(name):
     Create a binary input for the network.
     """
     data = paddle.layer.data(
-        name=name,
-        type=paddle.data_type.dense_vector_sequence(1))
+        name=name, type=paddle.data_type.dense_vector_sequence(1))
     return data
 
+
 import random
-def make_gru_step(size, static_input):
+
+
+def make_gru_step(size, static_input, prefix):
     """Make a gru step for recurrent_group"""
-    boot = paddle.layer.fc(
-      size=size,
-      act=paddle.activation.Tanh(),
-      bias_attr=False,
-      input=static_input)
+    boot = paddle.layer.fc(size=size,
+                           act=paddle.activation.Tanh(),
+                           bias_attr=False,
+                           input=static_input)
 
     def gru_with_static_input(current_input, static_input):
-         mem = paddle.layer.memory(name='memory-'+str(random.randint(0, 1000000)), size=size, boot_layer=boot)
-         gru_inputs = paddle.layer.fc(
-             act=paddle.activation.Linear(),
-             size=size * 3, bias_attr=False,
-             input=[static_input, current_input])
-         gru_step = paddle.layer.gru_step(
-             name='gru_decoder',
-             input=gru_inputs,
-             output_mem=mem,
-             size=size)
-         return gru_step
+        mem = paddle.layer.memory(
+            # name='memory-' + str(random.randint(0, 1000000)),
+            name='gru_decoder' + prefix,
+            size=size,
+            boot_layer=boot)
+        gru_inputs = paddle.layer.fc(act=paddle.activation.Linear(),
+                                     size=size * 3,
+                                     bias_attr=False,
+                                     input=[static_input, current_input])
+
+        # without prefix, there may be problem when this function
+        # is called more than one time,
+        # because every layer in paddle have a unique name
+        gru_step = paddle.layer.gru_step(
+            name='gru_decoder' + prefix,
+            input=gru_inputs,
+            output_mem=mem,
+            size=size)
+        return gru_step
+
     return gru_with_static_input
 
 
@@ -111,18 +122,29 @@ def lstm(inputs, size, layers, static=None):
     """
     Run a bidirectional LSTM on the inputs.
     """
+    # If you do not need to implement attended decoder, I suggest to use
+    #
     for i in range(layers):
-	if static is not None:
-	    inputs = [inputs, paddle.layer.StaticInput(static)]
+        if static is not None:
+            inputs = [inputs, paddle.layer.StaticInput(static)]
             print("HELLO")
-            fwd = paddle.layer.recurrent_group(input=inputs, step=make_gru_step(size, static), name="fwd")
+            fwd = paddle.layer.recurrent_group(
+                input=fwd if i else inputs,
+                step=make_gru_step(size, static, "__fwd_%02d__" % i),
+                name="fwd_%02d" % i)
             print("HELLO")
-            bwd = paddle.layer.recurrent_group(input=inputs, step=make_gru_step(size, static), reverse=True, name="bwd")
+            bwd = paddle.layer.recurrent_group(
+                input=bwd if i else inputs,
+                step=make_gru_step(size, static, "__bwd_%02d__" % i),
+                reverse=True,
+                name="bwd_%02d" % i)
             print("HELLO")
         else:
-            fwd = paddle.networks.simple_lstm(input=inputs, size=size)
-            bwd = paddle.networks.simple_lstm(input=inputs, size=size, reverse=True)
-        inputs = paddle.layer.concat(input=[fwd, bwd])
+            fwd = paddle.networks.simple_lstm(
+                input=fwd if i else inputs, size=size)
+            bwd = paddle.networks.simple_lstm(
+                input=bwd if i else inputs, size=size, reverse=True)
+    inputs = paddle.layer.concat(input=[fwd, bwd])
 
     final_states = paddle.layer.concat(input=[
         paddle.layer.last_seq(input=fwd),
@@ -137,17 +159,18 @@ def build_document_embeddings(config, documents, same_as_question,
     Build the document word embeddings.
     """
     hidden = paddle.layer.dropout(
-        input=documents,
-        dropout_rate=config.embedding_dropout)
+        input=documents, dropout_rate=config.embedding_dropout)
     hidden = paddle.layer.concat(input=[
         hidden,
         same_as_question,
     ])
 
     # Half the question embedding is the final states of the LSTMs.
-    final, hidden = lstm(hidden, config.layer_size,
-                         config.document_layers,
-			 static=question_vector)
+    final, hidden = lstm(
+        hidden,
+        config.layer_size,
+        config.document_layers,
+        static=question_vector)
 
     return hidden
 
@@ -156,29 +179,23 @@ def build_question_vector(config, questions):
     """
     Build the question vector.
     """
-    hidden = paddle.layer.dropout(
-        input=questions,
-        dropout_rate=config.embedding_dropout)
-
-    # Half the question embedding is the final states of the LSTMs.
-    final, hidden = lstm(hidden, config.layer_size,
-                         config.question_layers)
+    final, lstm_hidden = lstm(questions, config.layer_size,
+                              config.question_layers)
 
     # The other half is created by doing an affine transform to generate
     # candidate embeddings, doing a second affine transform followed by a
     # sequence softmax to generate weights for the embeddings, and summing over
     # the weighted embeddings to generate the second half of the question
     # embedding.
-    candidates = paddle.layer.fc(
-        input=hidden, size=config.layer_size, act=None)
-    weights = paddle.layer.fc(
-        input=hidden, size=1, act=paddle.activation.SequenceSoftmax())
-    weighted = paddle.layer.scaling(
-        input=candidates,
-        weight=weights)
+    candidates = paddle.layer.fc(input=lstm_hidden,
+                                 size=config.layer_size,
+                                 act=None)
+    weights = paddle.layer.fc(input=questions,
+                              size=1,
+                              act=paddle.activation.SequenceSoftmax())
+    weighted = paddle.layer.scaling(input=candidates, weight=weights)
     embedding = paddle.layer.pooling(
-        input=weighted,
-        pooling_type=paddle.pooling.Sum())
+        input=weighted, pooling_type=paddle.pooling.Sum())
 
     return paddle.layer.concat(input=[final, embedding])
 
@@ -191,10 +208,10 @@ def pick_word(config, word_embeddings):
     This is done with a two-class classification.
     """
     hidden = paddle.layer.dropout(
-        input=word_embeddings,
-        dropout_rate=config.hidden_dropout)
-    predictions = paddle.layer.fc(
-        input=hidden, size=2, act=paddle.activation.Softmax())
+        input=word_embeddings, dropout_rate=config.hidden_dropout)
+    predictions = paddle.layer.fc(input=hidden,
+                                  size=2,
+                                  act=paddle.activation.Softmax())
     return predictions
 
 
@@ -202,18 +219,25 @@ def build_classification_loss(predictions, classes):
     """
     Build a classification loss given predictions and desired outputs.
     """
-    return paddle.layer.cross_entropy_cost(
-        input=predictions,
-        label=classes)
+    return paddle.layer.cross_entropy_cost(input=predictions, label=classes)
 
 
 def build_model(config):
     """
     Build the PaddlePaddle model for a configuration.
     """
-    questions = embedding_input("Questions", config.vocab_size)
-    documents = embedding_input("Documents", config.vocab_size)
+    optimizer = paddle.optimizer.Adam(
+        learning_rate=config.learning_rate,
+        learning_rate_schedule="discexp",
+        learning_rate_decay_a=config.anneal_rate,
+        learning_rate_decay_b=config.anneal_every * config.batch_size)
+
+    questions = embedding_input("Questions", config.vocab_size,
+                                config.embedding_dropout)
+    documents = embedding_input("Documents", config.vocab_size,
+                                config.embedding_dropout)
     same_as_question = binary_input("SameAsQuestion")
+
     correct_sentence = binary_output("CorrectSentence")
     correct_start_word = binary_output("CorrectStartWord")
     correct_end_word = binary_output("CorrectEndWord")
@@ -230,19 +254,13 @@ def build_model(config):
         build_classification_loss(start_word_pred, correct_start_word),
         build_classification_loss(end_word_pred, correct_end_word),
     ]
+    print(parse_network(losses))
 
     parameters = paddle.parameters.create(losses)
 
-    optimizer = paddle.optimizer.Adam(
-        learning_rate=config.learning_rate,
-        learning_rate_schedule="discexp",
-        learning_rate_decay_a=config.anneal_rate,
-        learning_rate_decay_b=config.anneal_every * config.batch_size)
-
-    trainer = paddle.trainer.SGD(
-        cost=losses,
-        parameters=parameters,
-        update_equation=optimizer)
+    trainer = paddle.trainer.SGD(cost=losses,
+                                 parameters=parameters,
+                                 update_equation=optimizer)
 
     return trainer, parameters
 
@@ -252,8 +270,9 @@ def choose_samples(path):
     Load filenames for train, dev, and augmented samples.
     """
     if not os.path.exists(os.path.join(path, "train")):
-        print("Non-existent directory as input path: {}".format(path),
-              file=sys.stderr)
+        print(
+            "Non-existent directory as input path: {}".format(path),
+            file=sys.stderr)
         sys.exit(1)
 
     # Get paths to all samples that we want to load.
@@ -281,10 +300,9 @@ def make_reader(samples):
 
         indices = np.arange(len(sample["context"]))
 
-	# The values must all be Python lists, not NumPy arrays.
-        yield (sample["context"],
-               sample["same_as_question_word"],
-	       sample["question"],
+        # The values must all be Python lists, not NumPy arrays.
+        yield (sample["context"], sample["same_as_question_word"],
+               sample["question"],
                (indices == sample["ans_sentence"]).tolist(),
                (indices == sample["ans_start"]).tolist(),
                (indices == sample["ans_end"]).tolist())
@@ -298,12 +316,14 @@ def build_reader(config):
 
     train_reader = lambda: make_reader(train_samples)
     train_reader = paddle.batch(
-        paddle.reader.shuffle(train_reader, buf_size=1000),
+        paddle.reader.shuffle(
+            train_reader, buf_size=1000),
         batch_size=config.batch_size)
 
     test_reader = lambda: make_reader(train_samples)
     test_reader = paddle.batch(
-        paddle.reader.shuffle(test_reader, buf_size=100),
+        paddle.reader.shuffle(
+            test_reader, buf_size=100),
         batch_size=config.batch_size)
     return train_reader, test_reader
 
@@ -312,12 +332,13 @@ def build_event_handler(config, parameters, trainer, test_reader):
     """
     Build the event handler for this model.
     """
+
     # End batch and end pass event handler
     def event_handler(event):
         """The event handler."""
         if isinstance(event, paddle.event.EndIteration):
-            print("\nPass %d, Batch %d, Cost %f, %s" % (
-                event.pass_id, event.batch_id, event.cost, event.metrics))
+            print("\nPass %d, Batch %d, Cost %f, %s" %
+                  (event.pass_id, event.batch_id, event.cost, event.metrics))
 
         if isinstance(event, paddle.event.EndPass):
             param_path = config.param_save_filename_format % event.pass_id
@@ -344,15 +365,17 @@ def train(config):
     """
     Train and run QA models with PaddlePaddle.
     """
-    paddle.init(use_gpu=True, trainer_count=1)
+    # paddle.init(use_gpu=True, trainer_count=1)
 
     conf = load_config(config)
     trainer, parameters = build_model(conf)
+    sys.exit(-1)
+
     train_reader, test_reader = build_reader(conf)
     handler = build_event_handler(conf, parameters, trainer, test_reader)
 
-    trainer.train(reader=train_reader, num_passes=conf.epochs,
-                  event_handler=handler)
+    trainer.train(
+        reader=train_reader, num_passes=conf.epochs, event_handler=handler)
 
 
 if __name__ == "__main__":

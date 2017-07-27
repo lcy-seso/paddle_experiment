@@ -4,7 +4,6 @@ import os
 import sys
 import gzip
 import logging
-import pdb
 
 import reader
 import paddle.v2 as paddle
@@ -31,9 +30,6 @@ def infer_a_batch(inferer, test_batch, ids_2_word):
     2. prediction for start word
     3. predictions for end word
     '''
-    total_words = 0
-    for test_sample in test_batch:
-        total_words += len(test_sample[1])
 
     sen_pred, start_pred, end_pred = inferer.infer(
         input=test_batch, field=["value"] * 3)

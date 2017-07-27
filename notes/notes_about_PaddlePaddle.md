@@ -55,3 +55,30 @@
 ## 4. A bug of current PaddelPaddle: **optimizer must be defined before the network topology.**
   - the detail information can be found in this issue: https://github.com/PaddlePaddle/Paddle/issues/2621
   - very sorry, and **be careful to this**, we will fix this.
+
+## 5. How to load pre-trained parameters that are trained by Paddle.
+
+1. deserialize the saved Paddle parameter：
+    ```python
+    # here width is size in a layer's declaration
+    def read_parameter(fname, width):
+        s = open(fname).read()
+        # skip the header information
+        vec = np.fromstring(s[16:], dtype=np.float32)
+        # here width is required to infer the shape of the matrix
+        np.savetxt(fname + ".csv", vec.reshape(width, -1),
+                fmt="%.6f", delimiter=",")
+    ```
+2. serialize pre-trained parameters：
+    - The codes below first generate a random matrix, and then save it to a parameter file that Paddle can load
+    - here is a [SRL example in PaddleBook](https://github.com/PaddlePaddle/book/blob/develop/07.label_semantic_roles/train.py#L142) which also use a pretrained embedding.
+
+    ```python
+    def gen_rand_param(param_file, width, height, need_trans):
+        np.random.seed()
+        # the header information is fixed, it does not need to be changed
+        header = struct.pack("iil", 0, 4, height * width)
+        param = np.float32(np.random.rand(height, width))
+        with open(param_file, "w") as fparam:
+            fparam.write(header + param.tostring())
+    ```

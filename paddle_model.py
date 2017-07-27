@@ -7,7 +7,6 @@ import json
 import random
 import collections
 from collections import namedtuple
-import pdb
 
 import paddle.v2 as paddle
 from paddle.v2.layer import parse_network
@@ -25,6 +24,10 @@ def embedding_input(name, vocab_size, drop_rate=0.):
     """
     data = paddle.layer.data(
         name=name, type=paddle.data_type.integer_value_sequence(vocab_size))
+
+    # CAUTIOUS: static parameters must be intialized by pre-trained parameter.
+    # BUT, currently, if static parameters is not intialized,
+    # Paddle will not warn you.
     embeddings = paddle.layer.embedding(
         input=data,
         size=EMBEDDING_DIM,
@@ -49,36 +52,6 @@ def binary_input(name):
     data = paddle.layer.data(
         name=name, type=paddle.data_type.dense_vector_sequence(1))
     return data
-
-
-def make_gru_step(size, static_input, prefix):
-    """Make a gru step for recurrent_group"""
-    boot = paddle.layer.fc(
-        size=size,
-        act=paddle.activation.Tanh(),
-        bias_attr=False,
-        input=static_input)
-
-    def gru_with_static_input(current_input, static_input):
-        mem = paddle.layer.memory(
-            name='gru_decoder' + prefix, size=size, boot_layer=boot)
-        gru_inputs = paddle.layer.fc(
-            act=paddle.activation.Linear(),
-            size=size * 3,
-            bias_attr=False,
-            input=[static_input, current_input])
-
-        # without prefix, there may be problem when this function
-        # is called more than one time,
-        # because every layer in paddle have a unique name
-        gru_step = paddle.layer.gru_step(
-            name='gru_decoder' + prefix,
-            input=gru_inputs,
-            output_mem=mem,
-            size=size)
-        return gru_step
-
-    return gru_with_static_input
 
 
 def bidirectional_lstm(inputs, size, depth, drop_rate=0., prefix=""):
@@ -216,6 +189,7 @@ def build_model(config, is_infer=False):
 
 
 if __name__ == "__main__":
+    from paddle_train import load_config
     conf = load_config("paddle-config.json")
     losses = build_model(conf)
     print(parse_network(losses))

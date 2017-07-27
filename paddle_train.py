@@ -2,7 +2,6 @@
 #coding=utf-8
 from __future__ import print_function
 
-import pdb
 import os
 import sys
 import logging
@@ -36,6 +35,10 @@ Config = namedtuple("Config", [
     "data_dir",
     "batch_size",
 ])
+
+
+def load_pretrained_parameters(path, height, width):
+    return
 
 
 def load_config(path):
@@ -154,6 +157,10 @@ def train(config):
     losses = build_model(conf)
     # print(parse_network(losses))
     parameters = paddle.parameters.create(losses)
+
+    ##    THIS IS NOT IMPLEMENTED YET
+    parameters.set('GloveVectors',
+                   load_pretrained_parameters(parameter_path, height, width))
 
     trainer = paddle.trainer.SGD(
         cost=losses, parameters=parameters, update_equation=optimizer)
